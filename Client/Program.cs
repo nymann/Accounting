@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Threading;
 using System.Windows.Forms;
 using Client.Helper;
@@ -16,6 +17,11 @@ namespace Client
         public readonly List<Person> EligiblePeople;
         private readonly CultureInfo _dK;
         private int _numberOfDinnerClubMeals = 0;
+        private bool _doBeerClubAccounting = false;
+        private double _moneySpentOnBeers = 0;
+        private int _beersBought = 0;
+        private int _ammountOfBeersStolen = 0;
+
 
         public Program()
         {
@@ -24,6 +30,7 @@ namespace Client
             EligiblePeople = SetupEligiblePersons();
             DoShoppingListAccountIng(SetupShoppingList());
             DoDinnerClubAccounting(SetupDinnerClubList());
+            BeerAccounting();
             WriteLatexSource();
         }
 
@@ -73,14 +80,6 @@ namespace Client
 
         private IEnumerable<Purchase> SetupShoppingList()
         {
-            /*
-            *  CSV Formatet af Indkøbslisten er:
-            *      Dato, Indkøber, Pris\n
-            *  
-            *  fx:
-            *  2017/01/30,1,20.5        
-            */
-
             var input = _rF.ReadFile("C://KK24//ShoppingList.csv");
             var purchases = new List<Purchase>();
             foreach (var line in input)
@@ -244,7 +243,7 @@ namespace Client
                     DateTime.Compare(purchase.Date, person.MovingOutDate) < 0)
                 {
                     person.OweShoppingList += purchase.Price /
-                                                  NumberOfEligiblePeople(purchase.Date);
+                                              NumberOfEligiblePeople(purchase.Date);
                 }
             }
         }
@@ -271,15 +270,15 @@ namespace Client
                         && DateTime.Compare(meal.Date, person.MovingOutDate) < 0)
                     {
                         person.OweDinnerClub += meal.Price /
-                                                    (NumberOfEligiblePeople(meal.Date, meal.PeopleWhoAttended) +
-                                                     meal.Guests.Count);
+                                                (NumberOfEligiblePeople(meal.Date, meal.PeopleWhoAttended) +
+                                                 meal.Guests.Count);
                         person.NumberOfTimesParticipatedInTheDinnerClub++;
                     }
                     if (meal.Guests.Contains(person.RoomNumber))
                     {
                         person.OweDinnerClub += meal.Price /
-                                                    (NumberOfEligiblePeople(meal.Date, meal.PeopleWhoAttended) +
-                                                     meal.Guests.Count);
+                                                (NumberOfEligiblePeople(meal.Date, meal.PeopleWhoAttended) +
+                                                 meal.Guests.Count);
                     }
 
                     if (!person.IsPartOfDinnerClub && meal.Guests.Contains(person.RoomNumber))
@@ -297,11 +296,58 @@ namespace Client
                                                   && DateTime.Compare(date, person.MovingOutDate) < 0);
         }
 
+        private int NumberOfBeersConsumed()
+        {
+            return EligiblePeople.Sum(person => person.ConsumedBeers);
+        }
+
         private static int NumberOfEligiblePeople(DateTime date, IEnumerable<Person> people)
         {
             return people.Count(person => DateTime.Compare(date, person.MovingInDate) >= 0
                                           && DateTime.Compare(date, person.MovingOutDate) < 0);
         }
+
+        private void BeerAccounting()
+        {
+            var doAccounting = MessageBox.Show("Do you wanna do beer-club accounting?",
+                "Beer-Club",
+                MessageBoxButtons.YesNo);
+
+            if (doAccounting == DialogResult.Yes)
+            {
+                _doBeerClubAccounting = true;
+                HowManyBeersDidEachPersonConsume();
+                Console.Write("\nBeverages bought: ");
+                var beersBought = Convert.ToInt32(Console.ReadLine());
+                Console.Write("Price paid for the bought beers including deposit (pant): ");
+                _moneySpentOnBeers = Convert.ToDouble(Console.ReadLine());
+                var pricePrBeer = _moneySpentOnBeers / beersBought;
+                Console.WriteLine("value entered: {0}", _moneySpentOnBeers.ToString("C", _dK));
+                Console.WriteLine("Price pr. beer with deposit, is set to {0}.", pricePrBeer.ToString("C", _dK));
+
+                foreach (var person in EligiblePeople.Where(person => person.ConsumedBeers > 0))
+                {
+                    person.BeerBalance -= person.ConsumedBeers * pricePrBeer;
+                }
+            }
+        }
+
+        private void HowManyBeersDidEachPersonConsume()
+        {
+            Console.WriteLine("Type in how many beers the following people have consumed.");
+            foreach (var person in EligiblePeople)
+            {
+                check:
+                Console.Write("{0}: ", person.NameOfPerson);
+                person.ConsumedBeers = Convert.ToInt32(Console.ReadLine());
+                if (person.ConsumedBeers < 0)
+                {
+                    Console.WriteLine("Did {0} really drink {1} beers?! Try again.");
+                    goto check;
+                }
+            }
+        }
+
 
         private static List<int> Guests(string guests)
         {
@@ -347,27 +393,52 @@ namespace Client
             content.Add(@"\centering");
             content.Add(@"\caption{Regnskab}");
             content.Add(@"\label{my-label}");
-            content.Add(@"\begin{tabular}{|c|c|c|c|c|}");
-            content.Add(@"\hline");
-            content.Add(
-                @"\textbf{Navn} & \textbf{Værelse} & \textbf{Total Balance} & \textbf{Indkøbsliste Balance} & \textbf{Madklub Balance} \\ \hline");
-
-            foreach (var person in EligiblePeople)
+            
+            if (!_doBeerClubAccounting)
             {
-                Console.WriteLine("SHOPPINGLIST: {0}, shopped for: {1:C}, owe: {2:C}, balance shoppinglist: {3:C}", person.NameOfPerson, person.SpentShoppingList, person.OweShoppingList, person.SpentShoppingList - person.OweShoppingList);
-                var color = person.Balance >= 0 ? colorPositive : colorNegative;
-                var shoppinglistBalance = (person.SpentShoppingList - person.OweShoppingList).ToString("C", _dK);
-                var dinnerClubBalance = (person.SpentDinnerClub - person.OweDinnerClub).ToString("C", _dK);
+                content.Add(@"\begin{tabular}{|c|c|c|c|c|}");
+                content.Add(@"\hline");
+                content.Add(
+                @"\textbf{Navn} & \textbf{Vær.} & \textbf{Total Balance} & \textbf{Indkøbsliste} & \textbf{Madklub} \\ \hline");
 
-                content.Add(person.NameOfPerson + " & " + person.RoomNumber + @" & \cellcolor[HTML]{" + color + "} " +
-                            person.Balance.ToString("C", _dK) + " & " + shoppinglistBalance + " & " + dinnerClubBalance +
-                            @" \\ \hline");
+                foreach (var person in EligiblePeople)
+                {
+                    Console.WriteLine("SHOPPINGLIST: {0}, shopped for: {1}, owe: {2}, balance shoppinglist: {3}\n\n",
+                        person.NameOfPerson, person.SpentShoppingList.ToString("C", _dK), person.OweShoppingList.ToString("C", _dK),
+                        (person.SpentShoppingList - person.OweShoppingList).ToString("C", _dK));
+                    var color = person.Balance >= 0 ? colorPositive : colorNegative;
+                    var shoppinglistBalance = (person.SpentShoppingList - person.OweShoppingList).ToString("C", _dK);
+                    var dinnerClubBalance = (person.SpentDinnerClub - person.OweDinnerClub).ToString("C", _dK);
+
+                    content.Add(person.NameOfPerson + " & " + person.RoomNumber + @" & \cellcolor[HTML]{" + color + "} " +
+                                person.Balance.ToString("C", _dK) + " & " + shoppinglistBalance + " & " + dinnerClubBalance +
+                                @" \\ \hline");
+                }
             }
+            else
+            {
+                content.Add(@"\begin{tabular}{|c|c|c|c|c|c|}");
+                content.Add(@"\hline");
+                content.Add(
+                @"\textbf{Navn} & \textbf{Vær.} & \textbf{Total Balance} & \textbf{Indkøbsliste} & \textbf{Madklub} & \textbf{Ølklub} \\ \hline");
+
+                foreach (var person in EligiblePeople)
+                {
+                    var color = person.Balance >= 0 ? colorPositive : colorNegative;
+                    var shoppinglistBalance = (person.SpentShoppingList - person.OweShoppingList).ToString("C", _dK);
+                    var dinnerClubBalance = (person.SpentDinnerClub - person.OweDinnerClub).ToString("C", _dK);
+
+                    content.Add(person.NameOfPerson + " & " + person.RoomNumber + @" & \cellcolor[HTML]{" + color + "} " +
+                                person.Balance.ToString("C", _dK) + " & " + shoppinglistBalance + " & " + dinnerClubBalance + " & " + person.BeerBalance.ToString("C", _dK) +
+                                @" \\ \hline");
+                }
+            }
+            
 
             content.Add(@"\end{tabular}");
             content.Add(@"\end{table}");
             content.Add(
-                @"Hvis total balance beløbet er negativt (rød), skylder du penge. Til dem der har en MobilePay konto og jeg kender vedrørendes nummer er der sendt en anmodning. Hvis det ikke er tilfældet kan du betale via:");
+                @"Hvis total balance beløbet er negativt (rødt), skylder du penge. Til dem der har en MobilePay konto og jeg kender vedrørendes nummer er der sendt en anmodning. Hvis det ikke er tilfældet kan du betale via:");
             content.Add(@"\begin{itemize}");
             content.Add("\t" + @"\item MobilePay: 22 80 53 26");
             content.Add("\t" + @"\item Regnr. 5370, Kontonr. 302136, Arbejdernes landsbank");
@@ -480,6 +551,20 @@ namespace Client
             }
             content.Add(@"\end{itemize}");
             content.Add(@"");
+            if (_doBeerClubAccounting)
+            {
+                var beersConsumedMostToLeast = EligiblePeople.OrderByDescending(x => x.ConsumedBeers);
+                content.Add(@"\newpage");
+                content.Add(@"\section{Ølklubs statistik}");
+                content.Add(@"\subsection{Hvem har drukket flest øl?}");
+                content.Add(@"\begin{itemize}");
+                foreach (var person in beersConsumedMostToLeast)
+                {
+                    content.Add("\t" + @"\item " + person.NameOfPerson + ": " + person.ConsumedBeers);
+                }
+                content.Add(@"\end{itemize}");
+                content.Add(@"");
+            }
             content.Add(@"\end{document}");
 
             WriteToFile(content.ToArray());

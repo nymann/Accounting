@@ -13,9 +13,10 @@ namespace Client
 
         public double Balance
             =>
-                (SpentShoppingList - OweShoppingList) + 
-                (SpentDinnerClub - OweDinnerClub) + 
-                (BalanceFromPreviousAccounting);
+                (SpentShoppingList - OweShoppingList) +
+                (SpentDinnerClub - OweDinnerClub) +
+                BalanceFromPreviousAccounting +
+                BeerBalance;
 
         public double SpentShoppingList { get; set; }
         public double OweShoppingList { get; set; }
@@ -24,9 +25,11 @@ namespace Client
         public double SpentDinnerClub { get; set; }
         public double OweDinnerClub { get; set; }
         public int NumberOfTimesParticipatedInTheDinnerClub { get; set; } = 0;
+
         #endregion
 
         #region Shopping list variables
+
         public int NumberOfTimesPaidUpfront { get; set; } = 0; // For statistics, non-essential.
 
         #endregion
@@ -39,7 +42,15 @@ namespace Client
 
         #endregion
 
-        public Person(int roomNumber, string nameOfPerson, bool isPartOfDinnerClub, double balance, DateTime movingInDate, DateTime movingOutDate)
+        #region Beer club variables
+
+        public int ConsumedBeers { get; set; } = 0;
+        public double BeerBalance { get; set; } = 0;
+
+        #endregion
+
+        public Person(int roomNumber, string nameOfPerson, bool isPartOfDinnerClub, double balance,
+            DateTime movingInDate, DateTime movingOutDate)
         {
             RoomNumber = roomNumber;
             IsPartOfDinnerClub = isPartOfDinnerClub;
