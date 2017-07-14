@@ -195,7 +195,8 @@ namespace Client
 
                 #region Price
 
-                var price = Convert.ToDouble(dinnerClubMeal[3]);
+                var priceString = dinnerClubMeal[3].Substring(0, dinnerClubMeal[3].IndexOf(" ", StringComparison.Ordinal));
+                var price = Convert.ToDouble(priceString);
 
                 #endregion
 
