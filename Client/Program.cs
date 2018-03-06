@@ -16,17 +16,15 @@ namespace Client
         private readonly ReadFileLineByLine _rF = new ReadFileLineByLine();
         public readonly List<Person> EligiblePeople;
         private readonly CultureInfo _dK;
-        private int _numberOfDinnerClubMeals = 0;
-        private bool _doBeerClubAccounting = false;
-        private double _moneySpentOnBeers = 0;
-        private int _beersBought = 0;
-        private int _ammountOfBeersStolen = 0;
-
+        private int _numberOfDinnerClubMeals;
+        private bool _doBeerClubAccounting;
+        private readonly double _moneySpentOnBeers = 0;
+        private double _moneyOwedToKristian;
 
         public Program()
         {
-            var myCI = new CultureInfo("da-DK", false);
-            _dK = (CultureInfo) myCI.Clone();
+            var myCi = new CultureInfo("da-DK", false);
+            _dK = (CultureInfo) myCi.Clone();
             EligiblePeople = SetupEligiblePersons();
             DoShoppingListAccountIng(SetupShoppingList());
             DoDinnerClubAccounting(SetupDinnerClubList());
@@ -64,6 +62,16 @@ namespace Client
                 }
 
                 var balance = Convert.ToDouble(split[3]);
+                if (balance < 0)
+                {
+                    // Personen har et udestående fra sidste regnskab
+                    _moneyOwedToKristian += Math.Abs(balance);
+                }
+                else
+                {
+                    // Personen har penge til gode fra sidste regnskab.
+                    _moneyOwedToKristian += balance;
+                }
                 var movingInDate = Convert.ToDateTime(!split[4].Equals("") ? split[4] : "1/1/2000", _dK);
                 var movingOutDate = split.Length > 5
                     ? Convert.ToDateTime(!split[5].Equals("") ? split[5] : "1/1/2423", _dK)
@@ -75,6 +83,10 @@ namespace Client
                 var person = new Person(roomNumber, name, isPartOfDinnerclub, balance, movingInDate, movingOutDate);
                 eligiblePersons.Add(person);
             }
+
+            eligiblePersons.First(person => person.NameOfPerson.Equals("Kristian")).BalanceFromPreviousAccounting +=
+                _moneyOwedToKristian;
+
             return eligiblePersons;
         }
 
@@ -107,7 +119,8 @@ namespace Client
 
                 // purchase[1], is where the information is stored.
                 var buyersRoomNumber = Convert.ToUInt16(purchase[1]);
-                var peopleWhoBoughtItem = EligiblePeople.Where(person => person.RoomNumber == buyersRoomNumber).ToList();
+                var peopleWhoBoughtItem =
+                    EligiblePeople.Where(person => person.RoomNumber == buyersRoomNumber).ToList();
 
                 #endregion
 
@@ -195,7 +208,7 @@ namespace Client
 
                 #region Price
 
-                var priceString = dinnerClubMeal[3].Substring(0, dinnerClubMeal[3].IndexOf(" ", StringComparison.Ordinal));
+                var priceString = dinnerClubMeal[3];
                 var price = Convert.ToDouble(priceString);
 
                 #endregion
@@ -208,11 +221,53 @@ namespace Client
 
                 #region People Who Attended
 
-                var nameOfAttendedPeople = dinnerClubMeal[5].Split(' ').ToList();
-                var peopleWhoAttended =
+                var namesOfPeopleWhoCancelled = dinnerClubMeal[5].Split(' ').ToList();
+                namesOfPeopleWhoCancelled.Remove("");
+                namesOfPeopleWhoCancelled.Remove(" ");
+                foreach (var name in namesOfPeopleWhoCancelled)
+                {
+                    if (!EligiblePeople.Any(person => person.NameOfPerson.Equals(name)))
+                    {
+                        throw new Exception(
+                            $"Der er angivet forkert navn i 'framelding' personen ({name}) eksisterer ikke!");
+                    }
+                }
+                /*var peopleWhoAttended =
                     EligiblePeople.Where(
-                            person => person.IsPartOfDinnerClub && !nameOfAttendedPeople.Contains(person.NameOfPerson))
-                        .ToList();
+                            person => person.IsPartOfDinnerClub && !namesOfPeopleWhoCancelled.Contains(person.NameOfPerson) && DateTime.Compare(person.MovingOutDate, date) )
+                        .ToList();*/
+
+                var peopleWhoAttended = new List<Person>();
+                foreach (var eligiblePerson in EligiblePeople)
+                {
+                    if (namesOfPeopleWhoCancelled.Contains(eligiblePerson.NameOfPerson))
+                    {
+                        continue;
+                    }
+
+                    if (!eligiblePerson.IsPartOfDinnerClub)
+                    {
+                        continue;
+                    }
+
+                    // Has the person already left Bergsøe at that date?
+                    if (!eligiblePerson.MovingOutDate.Equals(null) &&
+                        DateTime.Compare(date, eligiblePerson.MovingOutDate) > 0
+                    ) // https://msdn.microsoft.com/en-us/library/system.datetime.compare(v=vs.110).aspx
+                    {
+                        continue;
+                    }
+
+                    // Has the person moved in yet at that date?
+                    if (!eligiblePerson.MovingInDate.Equals(null) &&
+                        DateTime.Compare(eligiblePerson.MovingInDate, date) > 0
+                    ) // https://msdn.microsoft.com/en-us/library/system.datetime.compare(v=vs.110).aspx
+                    {
+                        continue;
+                    }
+
+                    peopleWhoAttended.Add(eligiblePerson);
+                }
 
                 #endregion
 
@@ -243,51 +298,8 @@ namespace Client
                 if (DateTime.Compare(purchase.Date, person.MovingInDate) >= 0 &&
                     DateTime.Compare(purchase.Date, person.MovingOutDate) < 0)
                 {
-                    person.OweShoppingList += purchase.Price /
-                                              NumberOfEligiblePeople(purchase.Date);
+                    person.OweShoppingList += purchase.Price / NumberOfEligiblePeople(purchase.Date);
                 }
-            }
-        }
-
-        private void DoDinnerClubAccounting(IEnumerable<DinnerClubMeal> dinnerClubMeals)
-        {
-            foreach (var meal in dinnerClubMeals)
-            {
-                foreach (var person in EligiblePeople)
-                {
-                    if (meal.Cooks.Contains(person))
-                    {
-                        person.NumberOfTimesCooked++;
-                    }
-
-                    if (meal.PeopleWhoPaid.Contains(person))
-                    {
-                        person.SpentDinnerClub += meal.Price / meal.PeopleWhoPaid.Count;
-                        person.NumberOfTimesPaidDinnerClubUpfront++;
-                    }
-
-                    if (person.IsPartOfDinnerClub && meal.PeopleWhoAttended.Contains(person) &&
-                        DateTime.Compare(meal.Date, person.MovingInDate) >= 0
-                        && DateTime.Compare(meal.Date, person.MovingOutDate) < 0)
-                    {
-                        person.OweDinnerClub += meal.Price /
-                                                (NumberOfEligiblePeople(meal.Date, meal.PeopleWhoAttended) +
-                                                 meal.Guests.Count);
-                        person.NumberOfTimesParticipatedInTheDinnerClub++;
-                    }
-                    if (meal.Guests.Contains(person.RoomNumber))
-                    {
-                        person.OweDinnerClub += meal.Price /
-                                                (NumberOfEligiblePeople(meal.Date, meal.PeopleWhoAttended) +
-                                                 meal.Guests.Count);
-                    }
-
-                    if (!person.IsPartOfDinnerClub && meal.Guests.Contains(person.RoomNumber))
-                    {
-                        person.NumberOfTimesParticipatedInTheDinnerClub++;
-                    }
-                }
-                _numberOfDinnerClubMeals++;
             }
         }
 
@@ -297,15 +309,92 @@ namespace Client
                                                   && DateTime.Compare(date, person.MovingOutDate) < 0);
         }
 
+        private void DoDinnerClubAccounting(IEnumerable<DinnerClubMeal> dinnerClubMeals)
+        {
+            foreach (var meal in dinnerClubMeals)
+            {
+                var doubleRoomPaidForGuest = false;
+                var doubleRoomPaidForDinner = false;
+
+                foreach (var person in meal.PeopleWhoAttended)
+                {
+                    if (meal.Cooks.Contains(person))
+                    {
+                        person.NumberOfTimesCooked++;
+                    }
+
+                    if (meal.PeopleWhoPaid.Contains(person))
+                    {
+                        var peopleWhoPaid = meal.PeopleWhoPaid.Count;
+                        if (person.RoomNumber == 1 && !doubleRoomPaidForDinner)
+                        {
+                            doubleRoomPaidForDinner = true;
+                            var roomOneHabitants = EligiblePeople.Where(p => p.RoomNumber == 1).ToList();
+                            if (roomOneHabitants.Count != 2)
+                            {
+                                throw new Exception(
+                                    "The number of people living in room number one is not equal to two.");
+                            }
+                            foreach (var roomOneHabitant in roomOneHabitants)
+                            {
+                                roomOneHabitant.SpentDinnerClub += meal.Price / peopleWhoPaid;
+                                roomOneHabitant.NumberOfTimesPaidDinnerClubUpfront++;
+                            }
+                        } else if(person.RoomNumber != 1)
+                        {
+                            person.SpentDinnerClub += meal.Price / peopleWhoPaid;
+                            person.NumberOfTimesPaidDinnerClubUpfront++;
+                        }
+                    }
+
+
+                    person.OweDinnerClub += meal.Price / (meal.PeopleWhoAttended.Count + meal.Guests.Count);
+                    person.NumberOfTimesParticipatedInTheDinnerClub++;
+
+                    if (meal.Guests.Contains(person.RoomNumber))
+                    {
+                        if (person.RoomNumber == 1)
+                        {
+                            // Room 1 is a double room, and if they have a guest it shouldn't be added twice.
+                            // However, we can't just divide by 2 since if only one person from room 1 attends with a guest.
+                            if (!doubleRoomPaidForGuest)
+                            {
+                                person.OweDinnerClub += meal.Price / (meal.PeopleWhoAttended.Count + meal.Guests.Count);
+                                doubleRoomPaidForGuest = true;
+                            }
+                        }
+                        else
+                        {
+                            person.OweDinnerClub += meal.Price / (meal.PeopleWhoAttended.Count + meal.Guests.Count);
+                        }
+                    }
+                }
+
+                var roomNumbersOfPeopleWhoAttended =
+                    meal.PeopleWhoAttended.Select(person => person.RoomNumber).ToList();
+                foreach (var roomNumberOfGuest in meal.Guests)
+                {
+                    if (!roomNumbersOfPeopleWhoAttended.Contains(roomNumberOfGuest))
+                    {
+                        var guest = EligiblePeople.First(person => person.RoomNumber == roomNumberOfGuest);
+                        guest.OweDinnerClub += meal.Price / (meal.PeopleWhoAttended.Count + meal.Guests.Count);
+                    }
+                }
+
+                _numberOfDinnerClubMeals++;
+
+                // Check balance
+                var dinnerClubBalance = (int) EligiblePeople.Sum(person => person.DinnerClubBalance);
+                if (dinnerClubBalance != 0)
+                {
+                    throw new Exception($"Dinnerclub total balance isn't 0! It's {dinnerClubBalance}.");
+                }
+            }
+        }
+
         private int NumberOfBeersConsumed()
         {
             return EligiblePeople.Sum(person => person.ConsumedBeers);
-        }
-
-        private static int NumberOfEligiblePeople(DateTime date, IEnumerable<Person> people)
-        {
-            return people.Count(person => DateTime.Compare(date, person.MovingInDate) >= 0
-                                          && DateTime.Compare(date, person.MovingOutDate) < 0);
         }
 
         private void BeerAccounting()
@@ -318,17 +407,24 @@ namespace Client
             {
                 _doBeerClubAccounting = true;
                 HowManyBeersDidEachPersonConsume();
-                Console.Write("\nBeverages bought: ");
+                /*Console.Write("\nBeverages bought: ");
                 var beersBought = Convert.ToInt32(Console.ReadLine());
                 Console.Write("Price paid for the bought beers including deposit (pant): ");
                 _moneySpentOnBeers = Convert.ToDouble(Console.ReadLine());
-                var pricePrBeer = _moneySpentOnBeers / beersBought;
+                var pricePrBeer = _moneySpentOnBeers / beersBought;*/
+                Console.Write("Price pr. beer");
+                var pricePrBeer = Convert.ToDouble(Console.ReadLine());
                 Console.WriteLine("value entered: {0}", _moneySpentOnBeers.ToString("C", _dK));
                 Console.WriteLine("Price pr. beer with deposit, is set to {0}.", pricePrBeer.ToString("C", _dK));
 
                 foreach (var person in EligiblePeople.Where(person => person.ConsumedBeers > 0))
                 {
                     person.BeerBalance -= person.ConsumedBeers * pricePrBeer;
+                    // Deduct that from the guy who bought the beers?
+                    if (person.NameOfPerson.Equals("Kristian"))
+                    {
+                        person.BeerBalance += NumberOfBeersConsumed() * pricePrBeer;
+                    }
                 }
             }
         }
@@ -371,48 +467,62 @@ namespace Client
         {
             var colorPositive = "67FD9A";
             var colorNegative = "E58080";
-            var lastMonth = new DateTime(DateTime.Now.Year, DateTime.Now.Month - 1, DateTime.Now.Day).ToString("MMMM",
-                _dK);
-            lastMonth = CultureInfo.CurrentCulture.TextInfo.ToTitleCase(lastMonth.ToLower());
-            var content = new List<string>();
+            string lastMonth;
+            if (DateTime.Now.Month > 1)
+            {
+                lastMonth = new DateTime(DateTime.Now.Year, DateTime.Now.Month - 1, DateTime.Now.Day).ToString("MMMM",
+                    _dK);
+            }
+            else
+            {
+                lastMonth = "December";
+            }
 
-            content.Add(@"\documentclass{article}");
-            content.Add(@"\usepackage[utf8]{inputenc}");
-            content.Add(@"\usepackage[table,xcdraw]{xcolor}");
-            content.Add(@"");
+            CultureInfo.CurrentCulture.TextInfo.ToTitleCase(lastMonth.ToLower());
+            var content = new List<string>
+            {
+                @"\documentclass{article}",
+                @"\usepackage[utf8]{inputenc}",
+                @"\usepackage[table,xcdraw]{xcolor}",
+                @"",
+                @"\title{Regnskab}",
+                @"\author{KK24}",
+                @"\date{" + DateTime.Now.Date.ToString("dd-MMMM-yyyy", _dK) + @"}",
+                @"",
+                @"\begin{document}",
+                @"",
+                @"\maketitle",
+                @"",
+                @"\section{Balance}",
+                @"\begin{table}[h]",
+                @"\centering",
+                @"\caption{Regnskab}",
+                @"\label{my-label}"
+            };
+
             //content.Add(@"\title{Regnskab for " + lastMonth + ", " + DateTime.Now.Year + @"}");
-            content.Add(@"\title{Regnskab}");
-            content.Add(@"\author{KK24}");
-            content.Add(@"\date{" + DateTime.Now.Date.ToString("dd-MMMM-yyyy", _dK) + @"}");
-            content.Add(@"");
-            content.Add(@"\begin{document}");
-            content.Add(@"");
-            content.Add(@"\maketitle");
-            content.Add(@"");
-            content.Add(@"\section{Balance}");
-            content.Add(@"\begin{table}[h]");
-            content.Add(@"\centering");
-            content.Add(@"\caption{Regnskab}");
-            content.Add(@"\label{my-label}");
-            
+
             if (!_doBeerClubAccounting)
             {
                 content.Add(@"\begin{tabular}{|c|c|c|c|c|}");
                 content.Add(@"\hline");
                 content.Add(
-                @"\textbf{Navn} & \textbf{Vær.} & \textbf{Total Balance} & \textbf{Indkøbsliste} & \textbf{Madklub} \\ \hline");
+                    @"\textbf{Navn} & \textbf{Vær.} & \textbf{Total Balance} & \textbf{Indkøbsliste} & \textbf{Madklub} \\ \hline");
 
                 foreach (var person in EligiblePeople)
                 {
                     Console.WriteLine("SHOPPINGLIST: {0}, shopped for: {1}, owe: {2}, balance shoppinglist: {3}\n\n",
-                        person.NameOfPerson, person.SpentShoppingList.ToString("C", _dK), person.OweShoppingList.ToString("C", _dK),
+                        person.NameOfPerson, person.SpentShoppingList.ToString("C", _dK),
+                        person.OweShoppingList.ToString("C", _dK),
                         (person.SpentShoppingList - person.OweShoppingList).ToString("C", _dK));
                     var color = person.Balance >= 0 ? colorPositive : colorNegative;
                     var shoppinglistBalance = (person.SpentShoppingList - person.OweShoppingList).ToString("C", _dK);
                     var dinnerClubBalance = (person.SpentDinnerClub - person.OweDinnerClub).ToString("C", _dK);
 
-                    content.Add(person.NameOfPerson + " & " + person.RoomNumber + @" & \cellcolor[HTML]{" + color + "} " +
-                                person.Balance.ToString("C", _dK) + " & " + shoppinglistBalance + " & " + dinnerClubBalance +
+                    content.Add(person.NameOfPerson + " & " + person.RoomNumber + @" & \cellcolor[HTML]{" + color +
+                                "} " +
+                                person.Balance.ToString("C", _dK) + " & " + shoppinglistBalance + " & " +
+                                dinnerClubBalance +
                                 @" \\ \hline");
                 }
             }
@@ -421,7 +531,7 @@ namespace Client
                 content.Add(@"\begin{tabular}{|c|c|c|c|c|c|}");
                 content.Add(@"\hline");
                 content.Add(
-                @"\textbf{Navn} & \textbf{Vær.} & \textbf{Total Balance} & \textbf{Indkøbsliste} & \textbf{Madklub} & \textbf{Ølklub} \\ \hline");
+                    @"\textbf{Navn} & \textbf{Vær.} & \textbf{Total Balance} & \textbf{Indkøbsliste} & \textbf{Madklub} & \textbf{Ølklub} \\ \hline");
 
                 foreach (var person in EligiblePeople)
                 {
@@ -429,12 +539,21 @@ namespace Client
                     var shoppinglistBalance = (person.SpentShoppingList - person.OweShoppingList).ToString("C", _dK);
                     var dinnerClubBalance = (person.SpentDinnerClub - person.OweDinnerClub).ToString("C", _dK);
 
-                    content.Add(person.NameOfPerson + " & " + person.RoomNumber + @" & \cellcolor[HTML]{" + color + "} " +
-                                person.Balance.ToString("C", _dK) + " & " + shoppinglistBalance + " & " + dinnerClubBalance + " & " + person.BeerBalance.ToString("C", _dK) +
+                    content.Add(person.NameOfPerson + " & " + person.RoomNumber + @" & \cellcolor[HTML]{" + color +
+                                "} " +
+                                person.Balance.ToString("C", _dK) + " & " + shoppinglistBalance + " & " +
+                                dinnerClubBalance + " & " + person.BeerBalance.ToString("C", _dK) +
                                 @" \\ \hline");
                 }
+                var totalBalanceSum = (int) EligiblePeople.Sum(person => person.Balance);
+                var shoppingListBalanceSum = (int) EligiblePeople.Sum(person => person.ShoppingListBalance);
+                var dinnerClubBalanceSum = (int) EligiblePeople.Sum(person => person.DinnerClubBalance);
+                var beerClubBalanceSum = (int) EligiblePeople.Sum(person => person.BeerBalance);
+                content.Add(@"\textbf{Sum} & & " +
+                            $"{totalBalanceSum} kr. & {shoppingListBalanceSum} kr. & {dinnerClubBalanceSum} kr. & {beerClubBalanceSum} kr." +
+                            @"\\ \hline");
             }
-            
+
 
             content.Add(@"\end{tabular}");
             content.Add(@"\end{table}");
@@ -507,12 +626,14 @@ namespace Client
             var attendancePercent =
                 EligiblePeople.OrderByDescending(x => x.NumberOfTimesParticipatedInTheDinnerClub).ToList();
             var cookedOftestToLeast = EligiblePeople.OrderByDescending(x => x.NumberOfTimesCooked).ToList();
-            var paidOftesToRarest = EligiblePeople.OrderByDescending(x => x.NumberOfTimesPaidDinnerClubUpfront).ToList();
+            var paidOftesToRarest =
+                EligiblePeople.OrderByDescending(x => x.NumberOfTimesPaidDinnerClubUpfront).ToList();
             var paidMostToLeast = EligiblePeople.OrderByDescending(x => x.SpentDinnerClub);
             foreach (var person in attendancePercent.Where(x => x.OweDinnerClub != 0))
             {
                 var name = person.NameOfPerson;
 
+                // Todo check date aswell here.
                 var percent = (double) person.NumberOfTimesParticipatedInTheDinnerClub /
                               (double) _numberOfDinnerClubMeals;
 
@@ -590,8 +711,16 @@ namespace Client
                 File.WriteAllLines(sfd.FileName, content);
             }
 
-            var lastMonth = new DateTime(DateTime.Now.Year, DateTime.Now.Month - 1, DateTime.Now.Day).ToString("MMMM",
-                _dK);
+            var lastMonth = "";
+            if (DateTime.Now.Month > 1)
+            {
+                lastMonth = new DateTime(DateTime.Now.Year, DateTime.Now.Month - 1, DateTime.Now.Day).ToString("MMMM",
+                    _dK);
+            }
+            else
+            {
+                lastMonth = "December";
+            }
             lastMonth = CultureInfo.CurrentCulture.TextInfo.ToTitleCase(lastMonth.ToLower());
 
             var command = @"pdflatex """ + sfd.FileName + @""" -job-name=""KK24 Regnskab for " + lastMonth +

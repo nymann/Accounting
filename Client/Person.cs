@@ -18,9 +18,15 @@ namespace Client
                 BalanceFromPreviousAccounting +
                 BeerBalance;
 
+        public double ShoppingListBalance =>
+            (SpentShoppingList - OweShoppingList);
+
+        public double DinnerClubBalance =>
+            (SpentDinnerClub - OweDinnerClub);
+
         public double SpentShoppingList { get; set; }
         public double OweShoppingList { get; set; }
-        public double BalanceFromPreviousAccounting { get; }
+        public double BalanceFromPreviousAccounting { get; set; }
 
         public double SpentDinnerClub { get; set; }
         public double OweDinnerClub { get; set; }
